@@ -43,7 +43,7 @@ void uirc_close(uirc_t *uirc);
 
 #endif
 
-#ifdef IRC_IMPLEMENTATION
+#ifdef UIRC_IMPLEMENTATION
 
 int uirc_connect(uirc_t *uirc, const char *host, const char *port) {
 #ifdef _WIN32

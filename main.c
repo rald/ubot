@@ -1,4 +1,4 @@
-#define IRC_IMPLEMENTATION
+#define UIRC_IMPLEMENTATION
 #include "uirc.h"
 
 #define DEFAULT_HOST "irc.undernet.org"
