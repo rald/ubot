@@ -5,14 +5,15 @@
 #define DEFAULT_HOST "irc.undernet.org"
 #define DEFAULT_PORT "6667"
 #define DEFAULT_CHAN "#pantasya"
+#define DEFAULT_NICK "friu"
 
 int main() {
     irc_t irc;
     char line[4096];
-    char nick[32] = "friu";
+    char nick[32] = DEFAULT_NICK;
 
     printf("Connecting to %s:%s...\n", DEFAULT_HOST, DEFAULT_PORT);
-    
+
     // 1. Establish connection (Portable: handles Winsock on Windows or POSIX on Unix)
     if (irc_connect(&irc, DEFAULT_HOST, DEFAULT_PORT) < 0) {
         perror("Connection failed");
