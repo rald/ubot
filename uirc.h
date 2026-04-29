@@ -1,55 +1,52 @@
-#ifndef MINI_IRC_H
-#define MINI_IRC_H
+#ifndef UIRC_H
+#define UIRC_H
 
-/* Define Windows Version (0x0600 = Vista+) to enable getaddrinfo */
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
     #ifndef _WIN32_WINNT
-        #define _WIN32_WINNT 0x0600
+    #define _WIN32_WINNT 0x0600
     #endif
+    #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+    #endif
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    typedef int socklen_t;
+#else
+    #define _POSIX_C_SOURCE 200112L
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <netdb.h>
+    #include <unistd.h>
+    typedef int SOCKET;
+    #define INVALID_SOCKET -1
+    #define SOCKET_ERROR -1
+    #define closesocket close
 #endif
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <stdarg.h>
-
-/* --- OS-Specific Headers and Typedefs --- */
-#if defined(_WIN32) || defined(_WIN64)
-    #define IRC_OS_WINDOWS
-    #include <winsock2.h>
-    #include <ws2tcpip.h>
-    typedef SOCKET irc_socket_t;
-#else
-    #define IRC_OS_UNIX
-    #include <sys/socket.h>
-    #include <netdb.h>
-    #include <unistd.h>
-    #include <errno.h>
-    #include <arpa/inet.h>
-    typedef int irc_socket_t;
-    #define INVALID_SOCKET -1
-    #define SOCKET_ERROR -1
-#endif
+#include <string.h>
 
 typedef struct {
-    irc_socket_t fd;
-    char *buf;    
-    size_t len;   
-    size_t cap;   
-} irc_t;
+    char *buf;
+    size_t len;
+    size_t cap;
+    SOCKET fd;
+} uirc_t;
 
-int  irc_connect(irc_t *irc, const char *host, const char *port);
-void irc_vsend(irc_t *irc, const char *fmt, va_list ap);
-void irc_send(irc_t *irc, const char *fmt, ...);
-int  irc_recv_line(irc_t *irc, char *out_buf, size_t out_len);
-void irc_close(irc_t *irc);
+int  uirc_connect(uirc_t *uirc, const char *host, const char *port);
+void uirc_send(uirc_t *uirc, const char *fmt, ...);
+int  uirc_recv_line(uirc_t *uirc, char *out_buf, size_t out_len);
+void uirc_close(uirc_t *uirc);
 
-#endif 
+#endif
 
 #ifdef IRC_IMPLEMENTATION
 
-int irc_connect(irc_t *irc, const char *host, const char *port) {
-#ifdef IRC_OS_WINDOWS
+int uirc_connect(uirc_t *uirc, const char *host, const char *port) {
+#ifdef _WIN32
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return -1;
 #endif
@@ -58,26 +55,26 @@ int irc_connect(irc_t *irc, const char *host, const char *port) {
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
-    irc->len = 0;
-    irc->cap = 1024;
-    irc->buf = (char*)malloc(irc->cap);
-    if (!irc->buf) return -1;
+    uirc->len = 0;
+    uirc->cap = 8192;
+    uirc->buf = (char*)malloc(uirc->cap);
+    if (!uirc->buf) return -1;
 
     if (getaddrinfo(host, port, &hints, &res) != 0) {
-        free(irc->buf);
+        free(uirc->buf);
         return -1;
     }
 
-    irc->fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (irc->fd == INVALID_SOCKET) {
+    uirc->fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (uirc->fd == INVALID_SOCKET) {
         freeaddrinfo(res);
-        free(irc->buf);
+        free(uirc->buf);
         return -1;
     }
 
-    if (connect(irc->fd, res->ai_addr, (int)res->ai_addrlen) == SOCKET_ERROR) {
-        irc_close(irc);
+    if (connect(uirc->fd, res->ai_addr, (int)res->ai_addrlen) == SOCKET_ERROR) {
         freeaddrinfo(res);
+        uirc_close(uirc);
         return -1;
     }
 
@@ -85,71 +82,65 @@ int irc_connect(irc_t *irc, const char *host, const char *port) {
     return 0;
 }
 
-void irc_vsend(irc_t *irc, const char *fmt, va_list ap) {
-    va_list aq;
-    va_copy(aq, ap);
-    int n = vsnprintf(NULL, 0, fmt, aq);
-    va_end(aq);
-    if (n < 0) return;
-
-    char *msg = (char*)malloc(n + 3);
-    if (!msg) return;
-
-    vsnprintf(msg, n + 1, fmt, ap);
-    memcpy(msg + n, "\r\n", 3);
-    n += 2;
-
-    int total = 0;
-    while (total < n) {
-        int sent = send(irc->fd, msg + total, n - total, 0);
-        if (sent <= 0) break;
-        total += sent;
-    }
-    free(msg);
-}
-
-void irc_send(irc_t *irc, const char *fmt, ...) {
+void uirc_send(uirc_t *uirc, const char *fmt, ...) {
+    char buf[514];
     va_list ap;
     va_start(ap, fmt);
-    irc_vsend(irc, fmt, ap);
+    int n = vsnprintf(buf, sizeof(buf) - 2, fmt, ap);
     va_end(ap);
+
+    if (n < 0) return;
+    memcpy(buf + n, "\r\n", 2);
+    n += 2;
+
+#ifdef _WIN32
+    send(uirc->fd, buf, n, 0);
+#else
+    #ifdef MSG_NOSIGNAL
+    send(uirc->fd, buf, n, MSG_NOSIGNAL);
+    #else
+    send(uirc->fd, buf, n, 0);
+    #endif
+#endif
 }
 
-int irc_recv_line(irc_t *irc, char *out_buf, size_t out_len) {
+int uirc_recv_line(uirc_t *uirc, char *out_buf, size_t out_len) {
     while (1) {
-        char *nl = (char*)memchr(irc->buf, '\n', irc->len);
+        char *nl = (char*)memchr(uirc->buf, '\n', uirc->len);
         if (nl) {
-            size_t line_len = nl - irc->buf + 1;
-            size_t copy_len = (line_len < out_len - 1) ? line_len : out_len - 1;
-            memcpy(out_buf, irc->buf, copy_len);
+            size_t line_len = (size_t)(nl - uirc->buf + 1);
+            size_t copy_len = (line_len >= out_len) ? out_len - 1 : line_len;
+
+            memcpy(out_buf, uirc->buf, copy_len);
             out_buf[copy_len] = '\0';
-            irc->len -= line_len;
-            memmove(irc->buf, nl + 1, irc->len);
+
+            uirc->len -= line_len;
+            if (uirc->len > 0) memmove(uirc->buf, nl + 1, uirc->len);
             return (int)copy_len;
         }
-        if (irc->len >= irc->cap) {
-            size_t new_cap = irc->cap * 2;
-            char *new_buf = (char*)realloc(irc->buf, new_cap);
-            if (!new_buf) return -1;
-            irc->buf = new_buf;
-            irc->cap = new_cap;
+
+        if (uirc->len >= uirc->cap) {
+            size_t new_cap = uirc->cap * 2;
+            char *tmp = (char*)realloc(uirc->buf, new_cap);
+            if (!tmp) return -1;
+            uirc->buf = tmp;
+            uirc->cap = new_cap;
         }
-        int n = recv(irc->fd, irc->buf + irc->len, (int)(irc->cap - irc->len), 0);
+
+        int n = recv(uirc->fd, uirc->buf + uirc->len, (int)(uirc->cap - uirc->len), 0);
         if (n <= 0) return n;
-        irc->len += n;
+        uirc->len += n;
     }
 }
 
-void irc_close(irc_t *irc) {
-    if (irc->buf) { free(irc->buf); irc->buf = NULL; }
-    if (irc->fd != INVALID_SOCKET) {
-#ifdef IRC_OS_WINDOWS
-        closesocket(irc->fd);
+void uirc_close(uirc_t *uirc) {
+    if (uirc->buf) { free(uirc->buf); uirc->buf = NULL; }
+    if (uirc->fd != INVALID_SOCKET) {
+        closesocket(uirc->fd);
+#ifdef _WIN32
         WSACleanup();
-#else
-        close(irc->fd);
 #endif
-        irc->fd = INVALID_SOCKET;
+        uirc->fd = INVALID_SOCKET;
     }
 }
 #endif

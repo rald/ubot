@@ -9,10 +9,11 @@ else
 endif
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -O2
+CFLAGS = -Wall -Wextra -std=c99 -O3 -march=native
 
 all: $(TARGET)
 
+# The LIBS must be at the end of the command line
 $(TARGET): main.c uirc.h
 	$(CC) $(CFLAGS) main.c -o $(TARGET) $(LIBS)
 

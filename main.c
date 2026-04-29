@@ -1,68 +1,53 @@
 #define IRC_IMPLEMENTATION
 #include "uirc.h"
 
-// Connection Configuration
 #define DEFAULT_HOST "irc.undernet.org"
 #define DEFAULT_PORT "6667"
 #define DEFAULT_CHAN "#pantasya"
 #define DEFAULT_NICK "friu"
 
 int main() {
-    irc_t irc;
-    char line[4096];
+    uirc_t uirc;
+    char line[1024];
     char nick[32] = DEFAULT_NICK;
 
     printf("Connecting to %s:%s...\n", DEFAULT_HOST, DEFAULT_PORT);
 
-    // 1. Establish connection (Portable: handles Winsock on Windows or POSIX on Unix)
-    if (irc_connect(&irc, DEFAULT_HOST, DEFAULT_PORT) < 0) {
+    if (uirc_connect(&uirc, DEFAULT_HOST, DEFAULT_PORT) < 0) {
         perror("Connection failed");
         return 1;
     }
 
-    // 2. Identify to the server
-    // USER syntax: USER <username> <mode> <unused> :<realname>
-    irc_send(&irc, "NICK %s", nick);
-    irc_send(&irc, "USER %s 0 * :%s", nick, nick);
+    uirc_send(&uirc, "NICK %s", nick);
+    uirc_send(&uirc, "USER %s 0 * :%s", nick, nick);
 
-    // 3. Main event loop
-    // irc_recv_line handles the partial TCP stream and returns one full line at a time
-    while (irc_recv_line(&irc, line, sizeof(line)) > 0) {
-        // Print raw output for debugging
+    while (uirc_recv_line(&uirc, line, sizeof(line)) > 0) {
+        if (strncmp(line, "PING ", 5) == 0) {
+            uirc_send(&uirc, "PONG %s", line + 5);
+            continue;
+        }
+
         printf("<<< %s", line);
 
-        // --- Logic: Handle Nickname in Use (Error 433) ---
-        if (strstr(line, " 433 ")) {
-            if (strlen(nick) < sizeof(nick) - 2) {
-                strcat(nick, "_");
-                printf("!!! Nickname taken, retrying as: %s\n", nick);
-                irc_send(&irc, "NICK %s", nick);
-            } else {
-                fprintf(stderr, "Fatal: Nickname limit reached.\n");
-                break;
-            }
+        char *cmd = (line[0] == ':') ? strchr(line, ' ') : line;
+        if (!cmd) continue;
+        if (cmd != line) cmd++;
+
+        if (strncmp(cmd, "433", 3) == 0) {
+            strncat(nick, "_", sizeof(nick) - strlen(nick) - 1);
+            uirc_send(&uirc, "NICK %s", nick);
         }
 
-        // --- Logic: Respond to PING (Keep-alive) ---
-        // Protocol requires PONG <daemon> to avoid timeout
-        if (strncmp(line, "PING", 4) == 0) {
-            line[1] = 'O'; // Quick swap: PING -> PONG
-            irc_send(&irc, "%s", line);
+        if (strncmp(cmd, "376", 3) == 0 || strncmp(cmd, "422", 3) == 0) {
+            uirc_send(&uirc, "JOIN %s", DEFAULT_CHAN);
         }
 
-        // --- Logic: Join Channel after Welcome (376 = End of MOTD, 422 = No MOTD) ---
-        if (strstr(line, " 376 ") || strstr(line, " 422 ")) {
-            irc_send(&irc, "JOIN %s", DEFAULT_CHAN);
-        }
-
-        // --- Logic: Basic Auto-Responder ---
-        if (strstr(line, "PRIVMSG") && strstr(line, "!info")) {
-            irc_send(&irc, "PRIVMSG %s :I am a minimal portable C bot.", DEFAULT_CHAN);
+        if (strncmp(cmd, "PRIVMSG", 7) == 0 && strstr(cmd, "!info")) {
+            uirc_send(&uirc, "PRIVMSG %s :Optimized C bot active.", DEFAULT_CHAN);
         }
     }
 
-    // 4. Cleanup
     printf("Connection lost.\n");
-    irc_close(&irc);
+    uirc_close(&uirc);
     return 0;
 }
