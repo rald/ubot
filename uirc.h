@@ -18,6 +18,7 @@
     #include <arpa/inet.h>
     #include <netdb.h>
     #include <unistd.h>
+    #include <signal.h> // Required for SIGPIPE handling on Unix
     typedef int SOCKET;
     #define INVALID_SOCKET -1
     #define SOCKET_ERROR -1
@@ -72,6 +73,12 @@ int uirc_connect(uirc_t *uirc, const char *host, const char *port) {
         return -1;
     }
 
+    // macOS specific: Prevent SIGPIPE on write to closed socket
+#ifdef SO_NOSIGPIPE
+    int set = 1;
+    setsockopt(uirc->fd, SOL_SOCKET, SO_NOSIGPIPE, (void*)&set, sizeof(int));
+#endif
+
     if (connect(uirc->fd, res->ai_addr, (int)res->ai_addrlen) == SOCKET_ERROR) {
         freeaddrinfo(res);
         uirc_close(uirc);
@@ -96,6 +103,7 @@ void uirc_send(uirc_t *uirc, const char *fmt, ...) {
 #ifdef _WIN32
     send(uirc->fd, buf, n, 0);
 #else
+    // Use MSG_NOSIGNAL if available (Linux), otherwise 0 (macOS uses SO_NOSIGPIPE)
     #ifdef MSG_NOSIGNAL
     send(uirc->fd, buf, n, MSG_NOSIGNAL);
     #else
@@ -127,7 +135,7 @@ int uirc_recv_line(uirc_t *uirc, char *out_buf, size_t out_len) {
             uirc->cap = new_cap;
         }
 
-        int n = recv(uirc->fd, uirc->buf + uirc->len, (int)(uirc->cap - uirc->len), 0);
+        int n = (int)recv(uirc->fd, uirc->buf + uirc->len, (int)(uirc->cap - uirc->len), 0);
         if (n <= 0) return n;
         uirc->len += n;
     }
